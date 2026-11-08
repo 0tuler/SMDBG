@@ -23,6 +23,7 @@ When the program terminates normally or crashes due to a system signal, such as 
 4. Check `memdbg_allocations.txt` in your working directory after the program exits to see your total memory usage and any uncleaned allocations.
 
 ## Todo(s)
+* Implement realloc.
 * Search for a better data structure to hold the AllocatedData to increase the free calls speed, currently it uses O(n) at most.
 
 ## Warning
