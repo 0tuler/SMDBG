@@ -16,8 +16,8 @@
 // based on the library being used
 #ifdef _OPENMP
 
-uint64_t __total_memory_allocated = 0;
-uint64_t __memory_not_cleaned = 0;
+uint64_t __mem_dbg_total_memory_allocated = 0;
+uint64_t __mem_dbg_memory_not_cleaned = 0;
 
 #define BEGIN_CRITICAL _Pragma("omp critical") {
 #define END_CRITICAL }
@@ -27,8 +27,8 @@ uint64_t __memory_not_cleaned = 0;
 
 #else
 
-_Atomic uint64_t __total_memory_allocated = 0;
-_Atomic uint64_t __memory_not_cleaned = 0;
+_Atomic uint64_t __mem_dbg_total_memory_allocated = 0;
+_Atomic uint64_t __mem_dbg_memory_not_cleaned = 0;
 pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define ATOMIC_ADD(var, size) atomic_fetch_add(&var, size);
@@ -46,7 +46,7 @@ pthread_mutex_t alloc_mutex = PTHREAD_MUTEX_INITIALIZER;
 AllocationTable allocation_table = {NULL};
 
 // Internal function used to send warnings if any allocation can not be made
-void *allocation_error(char *obj, void *alloc) {
+void *__mem_dbg_allocation_error(char *obj, void *alloc) {
   if (alloc == NULL) {
     fprintf(stderr, "ERROR: Not enough memory, tried to alloc for %s.\n", obj);
     exit(1);
@@ -56,15 +56,17 @@ void *allocation_error(char *obj, void *alloc) {
 }
 
 // Need to look for a better way to write reports
-void __report_allocations() {
+void __mem_dbg_report_allocations() {
   FILE *file = fopen("memdbg_allocations.txt", "w");
   if (!file)
     return;
 
   // Writes the total memory allocated and the memory not cleaned to the memory
   // report
-  fprintf(file, "Total memory allocated: %lu\n", __total_memory_allocated);
-  fprintf(file, "Total memory not cleaned: %lu\n", __memory_not_cleaned);
+  fprintf(file, "Total memory allocated: %lu\n",
+          __mem_dbg_total_memory_allocated);
+  fprintf(file, "Total memory not cleaned: %lu\n",
+          __mem_dbg_memory_not_cleaned);
 
   char *last_position = NULL;
 
@@ -99,7 +101,7 @@ void __report_allocations() {
 
 void __mem_dbg_signal_handler(int sig) {
   // Reports and the handles the signal case
-  __report_allocations();
+  __mem_dbg_report_allocations();
   switch (sig) {
     MEM_DBG_SIG_CASE(SIGINT)
     MEM_DBG_SIG_CASE(SIGILL)
@@ -119,46 +121,46 @@ void __mem_dbg_signal_handler(int sig) {
 }
 
 // Extends the freelist whenever is needed
-void __extend_allocations_freelist() {
+void __mem_dbg_extend_allocations_freelist() {
   FreeList *freelist = allocation_table.__freelist;
 
   if (freelist == NULL) {
-    freelist = allocation_error("freelist", malloc(sizeof(FreeList)));
+    freelist = __mem_dbg_allocation_error("freelist", malloc(sizeof(FreeList)));
 
-    freelist->ptr =
-        allocation_error("freelist->ptr", malloc(sizeof(uint64_t) * 32));
+    freelist->ptr = __mem_dbg_allocation_error("freelist->ptr",
+                                               malloc(sizeof(uint64_t) * 32));
 
     freelist->cap = 32;
     freelist->size = 0;
     allocation_table.__freelist = freelist;
   } else if (freelist->size == freelist->cap) {
     freelist->cap *= 2;
-    freelist->ptr = allocation_error(
+    freelist->ptr = __mem_dbg_allocation_error(
         "freelist->ptr",
         realloc(freelist->ptr, freelist->cap * sizeof(uint64_t)));
   }
 }
 
-void __extend_allocations() {
+void __mem_dbg_extend_allocations() {
   // Makes sure there is space in the freelist
-  __extend_allocations_freelist();
+  __mem_dbg_extend_allocations_freelist();
   if (allocation_table.ptr == NULL) {
-    allocation_table.ptr = allocation_error(
+    allocation_table.ptr = __mem_dbg_allocation_error(
         "allocation_table.ptr", malloc(sizeof(AllocatedData) * 1024));
     allocation_table.cap = 1024;
     allocation_table.size = 0;
   } else if (allocation_table.size == allocation_table.cap) {
     allocation_table.cap *= 2;
-    allocation_table.ptr =
-        allocation_error("allocation_table.ptr",
-                         realloc(allocation_table.ptr,
-                                 allocation_table.cap * sizeof(AllocatedData)));
+    allocation_table.ptr = __mem_dbg_allocation_error(
+        "allocation_table.ptr",
+        realloc(allocation_table.ptr,
+                allocation_table.cap * sizeof(AllocatedData)));
   }
 }
 
-void __free_allocation_table() {
+void __mem_dbg_free_allocation_table() {
   // Saves the report on a file
-  __report_allocations();
+  __mem_dbg_report_allocations();
 
   if (allocation_table.ptr != NULL) {
     for (uint64_t i = 0; i < allocation_table.size; i++) {
@@ -186,7 +188,7 @@ void __free_allocation_table() {
   }
 }
 
-void *__my_malloc(size_t size, char *position) {
+void *__mem_dbg_malloc(size_t size, char *position) {
   // Makes sure the program does not crash when calling malloc
   static uint8_t is_initialized = 0;
 
@@ -196,7 +198,7 @@ void *__my_malloc(size_t size, char *position) {
     if (!is_initialized) {
       // Makes sure the allocation table is cleaned at the end, only works when
       // the programn terminates normally
-      atexit(__free_allocation_table);
+      atexit(__mem_dbg_free_allocation_table);
       // Make sure that when the program exits cleaning with signals
       signal(SIGINT, __mem_dbg_signal_handler);
       signal(SIGILL, __mem_dbg_signal_handler);
@@ -216,8 +218,8 @@ void *__my_malloc(size_t size, char *position) {
     END_CRITICAL
   }
 
-  ATOMIC_ADD(__memory_not_cleaned, size);
-  ATOMIC_ADD(__total_memory_allocated, size);
+  ATOMIC_ADD(__mem_dbg_memory_not_cleaned, size);
+  ATOMIC_ADD(__mem_dbg_total_memory_allocated, size);
 
   void *ptr = malloc(size);
 
@@ -225,7 +227,7 @@ void *__my_malloc(size_t size, char *position) {
     BEGIN_CRITICAL
 
     // Makes sure there is enough space in the buffers
-    __extend_allocations();
+    __mem_dbg_extend_allocations();
     FreeList *freelist = allocation_table.__freelist;
     AllocatedData *alloc;
     // Checks if there is space in the freelist if not get a new position in the
@@ -260,7 +262,7 @@ void *__my_malloc(size_t size, char *position) {
   exit(1);
 }
 
-void __my_free(void *ptr) {
+void __mem_dbg_free(void *ptr) {
   uint8_t found = 0;
 
   if (ptr != NULL) {
@@ -271,7 +273,7 @@ void __my_free(void *ptr) {
       AllocatedData *alloc = &allocation_table.ptr[i];
       if (alloc->ptr == ptr) {
 
-        ATOMIC_SUB(__memory_not_cleaned, alloc->size);
+        ATOMIC_SUB(__mem_dbg_memory_not_cleaned, alloc->size);
 
         alloc->size = 0;
         free(alloc->ptr);
@@ -283,7 +285,7 @@ void __my_free(void *ptr) {
 
         // Guarantees that exists space in the freelist before inserting
         if (freelist->size == freelist->cap) {
-          __extend_allocations_freelist();
+          __mem_dbg_extend_allocations_freelist();
         }
 
         // Stores the indices
