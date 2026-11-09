@@ -6,7 +6,7 @@ Simple Memory Debugger is a lightweight, thread-safe development tool for C prog
 This tool is strictly for debugging and development purposes and should not be used in production environments.
 
 ## How It Works
-The library uses preprocessor macros to override standard `malloc` and `free` calls. When you include the header file, any call to `malloc` is redirected to a custom function (`__my_malloc`) that records the pointer, the size of the allocation, and the specific file and line number where the allocation occurred.
+The library uses preprocessor macros to override standard `malloc` and `free` calls. When you include the header file, any call to `malloc` is redirected to a custom function (`__mem_dbg_malloc`) that records the pointer, the size of the allocation, and the specific file and line number where the allocation occurred.
 
 When the program terminates normally or crashes due to a system signal, such as a Segmentation Fault or a Ctrl+C interrupt, the debugger automatically generates a report file named `memdbg_allocations.txt`.
 
